@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import random
 import numpy as np
+from collections import namedtuple
 
 def solve_it(input_data):
     # Modify this code to run your optimization algorithm
@@ -24,14 +25,13 @@ def solve_it(input_data):
     solution = find_minimal_coloring(node_count,edges, solution)
 
     # prepare the solution in the specified output format
-    output_data = str(node_count) + ' ' + str(0) + '\n'
+    output_data = str(max(solution) + 1) + ' ' + str(0) + '\n'
     output_data += ' '.join(map(str, solution))
 
     return output_data
 
 def find_minimal_coloring(node_count, edges, solution):
     upper_bound = node_count
-    memory_mechanism = {}
     tmp = [np.nan] * node_count
     cs = constraint_store(node_count, edges, upper_bound)
     #inner loop - try to find a solution. if fails update trajectory
@@ -41,10 +41,11 @@ def find_minimal_coloring(node_count, edges, solution):
         upper_bound = len(set(solution))
         cs._update_upper_bound(upper_bound)
         print(f'upper_bound found is: {upper_bound}')
+        print(solution)
 
     #outer loop
     while True:
-        better_solution = replace_color_ordering(solution,upper_bound,edges,cs,memory_mechanism)
+        better_solution = replace_color_ordering(solution,upper_bound,edges,cs)
         if max(better_solution) < max(solution):
             solution = better_solution.copy()
             upper_bound = len(set(solution))
@@ -52,54 +53,83 @@ def find_minimal_coloring(node_count, edges, solution):
             print(f'upper_bound found is: {upper_bound}')
         else:
             break
-    #
-    #
-    #         print(check_feasibility(edges, solution))
-    #     else:
-    #         break
-
-    #divide and conquer with strongly connected components
-
-    #try to color with N-1 colors. fail fast!
-    #if we can't reduce number of colors return results (max time to run is 5 hours)
-    #break simetry
 
     return solution
 
-def replace_color_ordering(solution,upper_bound,edges,cs,memory_mechanism):
-    vertexes_to_consider = [v for (v,s) in enumerate(solution) if s == upper_bound -1]
-    open_vertexes = [v for v in range(len(solution)) if len(cs.edges_constraints[v]) > 0]
-    #check if there is a theoretical solution. if not break
-    if len(vertexes_to_consider) > len(open_vertexes):
-        return solution
-    fixed = 0
+def replace_color_ordering(solution,upper_bound,edges,cs):
     new_solution = solution.copy()
-    while fixed < len(vertexes_to_consider):
-        #TODO insert memory mech
-        vertex_num = vertexes_to_consider[fixed] #TODO find smarter ways to order this list
-        relevant_edges = [(x,y) for x,y in edges if (x==vertex_num or y==vertex_num)]
-        neighbors = set([item for sublist in relevant_edges for item in sublist if item != vertex_num])
-        new_solution = replace_color(vertex_num, neighbors, new_solution, cs)
-        if new_solution != solution and check_feasibility(edges, new_solution):
-            fixed += 1
+    vertexes_to_consider = [v for (v,s) in enumerate(new_solution) if s == upper_bound -1]
+    while max(new_solution) == upper_bound - 1:
+        explore_que = []
+        open_vertexes = [v for v in range(len(new_solution)) if len(cs.edges_constraints[v]) > 0]
+        #check if there is a theoretical solution. if not break
+        if len(vertexes_to_consider) > len(open_vertexes):
+            return solution
+        #first lets find a path
+        vertex = vertexes_to_consider.pop()
+        print(f'vertex is: {vertex}')
+        path = find_possible_paths(vertex, open_vertexes, edges, new_solution, explore_que)
+        print(f"vertex is present in swapping plan: {len([(x,y) for x,y in path if x == vertex or y == vertex]) > 0}")
+        for p in path:
+            #now lets explore a new solution after swapping some colors
+            print(f'swapping {p[0]} and {p[1]}')
+            new_solution = swapping(new_solution, cs, p)
+        print(f"new solution is feasible: {check_feasibility(edges, new_solution)}")
+        if max(new_solution) < max(solution):
             solution = new_solution.copy()
+            return solution
+        elif new_solution != solution:
+            pass
         else:
-            print(1)
             break
+
     return solution
 
-def replace_color(vertex, neighbors, new_solution, cs):
-    neighbors_list = [(n, cs.edges_constraints[n]) for n in neighbors]
-    neighbors_list.sort(key = lambda x: len(x[1])) #TODO secondary metric (lowest color and\or number of constraints)
-    while len(neighbors_list) > 0:
-        n,values = neighbors_list.pop()
-        if len(values) > 0:
-            chosen_color = min(values)
-            new_solution[vertex] = new_solution[n]
-            new_solution[n] = chosen_color
-            break
-        else:
-            break #TODO
+def find_possible_paths(vertex, open_vertexes, edges, new_solution,explore_que, path_cost = 0, que_so_far = [], level = 1):
+    if level == 10:
+        return []
+    relevant_edges = [(x,y) for x,y in edges if (x==vertex or y==vertex)]
+    neighbors = [item for sublist in relevant_edges for item in sublist if item != vertex]
+    colors_constraints = {}
+    for c in range(max(new_solution)):
+        colors_constraints[c] = [n for n in neighbors if new_solution[n] == c]
+
+    possible_changes = {}
+    for i in [n for n in neighbors if n in open_vertexes]:
+        possible_changes[new_solution[i]] = possible_changes.get(new_solution[i], [])
+        possible_changes[new_solution[i]].append(i)
+
+    for c in range(max(new_solution)):
+        try:
+            counter = len(possible_changes[c]) - len(colors_constraints[c])
+            if counter >= 0:
+                explore_que.append((True, -path_cost, que_so_far + [(s,vertex) for s in possible_changes[c]], []))
+            else:
+                unsolved = [x for x in colors_constraints[c] if x not in possible_changes[c]]
+                explore_que.append((False, -(path_cost + len(unsolved) * level), [(s,vertex) for s in possible_changes[c]] , unsolved))
+        except:
+            pass
+    explore_que.sort(key = lambda x: (x[0],x[1], -len(x[2])),reverse=True)
+    if sum([flag for (flag,_,_,_) in explore_que]) > 0:
+        potential_paths =  [x for (flag,_,x,_) in explore_que if flag][0]
+    else:
+        _,new_cost,swapped, vertexes_to_explore = explore_que.pop(0)
+        for v in vertexes_to_explore:
+            new_open = [x for x in open_vertexes if not x in swapped]
+            potential_paths = find_possible_paths(v, new_open, edges, new_solution, explore_que, -new_cost, swapped, level+1)
+
+    return potential_paths
+
+def swapping(new_solution, cs, path):
+    #swap colors
+    destination, origin = path
+    chosen_color = new_solution[destination]
+    open_color = min(cs.edges_constraints[destination])
+    new_solution[destination] = open_color
+    new_solution[origin] = chosen_color
+    #update constraints
+    cs._refresh_constraints(origin,new_solution)
+    cs._refresh_constraints(destination,new_solution)
     return new_solution
 
 def first_approximation(edges, solution, cs, upper_bound):
@@ -107,7 +137,7 @@ def first_approximation(edges, solution, cs, upper_bound):
     new_edges = prune_edges(edges, solution)
     #order remaining open vertexes
     order_list = choose_next_point_order(solution, cs)
-    #brute force all options #TODO
+    #brute force all options
 
     if len(order_list) == 0:
         return solution
@@ -131,13 +161,6 @@ def prune_edges(edges, solution):
             new_edges.remove((e1,e2))
     return new_edges
 
-# def update_memory(memory_mechanism, new_edges, v):
-#     num_edges_remaining = len(new_edges)
-#     decision_vertex = v
-#     memory_mechanism[(num_edges_remaining)] = memory_mechanism.get((num_edges_remaining), [])
-#     memory_mechanism[(num_edges_remaining)].append(decision_vertex)
-#     return memory_mechanism
-
 def choose_next_point_order(solution, cs):
     #order by open edges and then number of constraints. #TODO
     list_of_remaining_vertex = [v for v,s in enumerate(solution) if (s is np.nan)]
@@ -146,21 +169,10 @@ def choose_next_point_order(solution, cs):
 
     return order_list
 
-def color_vertex(vertex, solution, upper_bound, cs, edges, action ='remove'):
-    if action == 'remove':
-        color = min([x for x in range(upper_bound) if x in cs._get_constraints(vertex)]) #TODO
-        solution[vertex] = color
-        cs._change_constraints(vertex, color, edges, action)
-
-    # elif action == "add": #TODO
-    #     if solution[vertex] == max_color - 1:
-    #         solution[vertex] = np.nan
-    #         cs._change_constraints(vertex, max_color - 1, edges, "remove")
-    #         max_color = max(0, len(set([x for x in solution if not x is np.nan])))
-    #     else:
-    #         pass #solution[vertex] = np.nan
-    else:
-        raise Exception(f"unfamiliar action {action}")
+def color_vertex(vertex, solution, upper_bound, cs, edges):
+    color = min([x for x in range(upper_bound) if x in cs._get_constraints(vertex)])
+    solution[vertex] = color
+    cs._change_constraints(vertex, color, edges)
 
     return solution
 
@@ -169,6 +181,7 @@ class constraint_store:
     def __init__(self,num_vertices,edges, upper_bound):
         self.edges = edges
         self.edges_constraints = {}
+        self.upper_bound = upper_bound
         # self.num_open_edges = {}
         for v in range(num_vertices):
             self.edges_constraints[v] = range(upper_bound)
@@ -182,30 +195,35 @@ class constraint_store:
     # def _get_open_edges(self, v):
     #     return self.num_open_edges[v]
 
-    def _change_single_constraint(self, v, color, action):
-        if action == 'add':
-            self.edges_constraints[v].append(color)
-        elif action == 'remove':
-            self.edges_constraints[v] = [c for c in self.edges_constraints[v] if c != color]
-        else:
-            raise Exception(f"unfamiliar action {action}")
+    def _change_single_constraint(self, v, color):
+        self.edges_constraints[v] = [c for c in self.edges_constraints[v] if c != color]
 
-    def _change_constraints(self, v, color, edges, action = 'remove'):
-        self._change_single_constraint(v, color, action)
+    def _change_constraints(self, v, color, edges):
+        self._change_single_constraint(v, color)
         for (x,y) in edges:
             if v == x:
-                self._change_single_constraint(y, color, action)
+                self._change_single_constraint(y, color)
             elif v == y:
-                self._change_single_constraint(x, color, action)
+                self._change_single_constraint(x, color)
 
     def _update_upper_bound(self, upper_bound):
+        self.upper_bound = upper_bound
         for k,v in self.edges_constraints.items():
             self.edges_constraints[k] = [c for c in self.edges_constraints[k] if c < upper_bound - 1]
+
+    def _refresh_constraints(self,v,solution):
+        self.edges_constraints[v] = range(self.upper_bound)
+        self._change_single_constraint(v, solution[v])
+        for x,y in self.edges:
+            if v == x:
+                self._change_single_constraint(x, solution[y])
+            elif v == y:
+                self._change_single_constraint(y, solution[x])
 
 def check_feasibility(edges, solution):
     for (x,y) in edges:
         if solution[x] == solution[y]:
-            print(x,y)
+            print(f'problem in edge {x,y}')
             return False
     return True
 
@@ -218,13 +236,9 @@ if __name__ == '__main__':
             input_data = input_data_file.read()
         print(solve_it(input_data))
     elif flag:
-        file_location = './data/gc_50_1'
+        file_location = './data/gc_250_9'
         with open(file_location, 'r') as input_data_file:
             input_data = input_data_file.read()
         print(solve_it(input_data))
     else:
         print('This test requires an input file.  Please select one from the data directory. (i.e. python solver.py ./data/gc_4_1)')
-
-
-        # #update memory
-        # memory_mechanism = update_memory(memory_mechanism, new_edges, v)
