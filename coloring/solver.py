@@ -34,14 +34,14 @@ def find_minimal_coloring(node_count, edges, solution):
     upper_bound = node_count
     tmp = [np.nan] * node_count
     cs = constraint_store(node_count, edges, upper_bound)
-    #inner loop - try to find a solution. if fails update trajectory
+    #first approximation
     tmp = first_approximation(edges, tmp, cs, upper_bound)
     if not np.nan in tmp:
         solution = tmp.copy()
         upper_bound = len(set(solution))
         cs._update_upper_bound(upper_bound)
         print(f'upper_bound found is: {upper_bound}')
-        print(solution)
+        # print(solution)
 
     #outer loop
     while True:
@@ -61,25 +61,25 @@ def replace_color_ordering(solution,upper_bound,edges,cs):
     vertexes_to_consider = [v for (v,s) in enumerate(new_solution) if s == upper_bound -1]
     while max(new_solution) == upper_bound - 1:
         explore_que = []
-        open_vertexes = [v for v in range(len(new_solution)) if len(cs.edges_constraints[v]) > 0]
+        open_vertexes = [v for v in range(len(new_solution)) if cs.find_open_vertex(v)]
         #check if there is a theoretical solution. if not break
         if len(vertexes_to_consider) > len(open_vertexes):
             return solution
         #first lets find a path
         vertex = vertexes_to_consider.pop()
-        print(f'vertex is: {vertex}')
+        # print(f'vertex is: {vertex}')
         path = find_possible_paths(vertex, open_vertexes, edges, new_solution, explore_que)
-        print(f"vertex is present in swapping plan: {len([(x,y) for x,y in path if x == vertex or y == vertex]) > 0}")
+        # print(f"vertex is present in swapping plan: {len([(x,y) for x,y in path if x == vertex or y == vertex]) > 0}")
         for p in path:
             #now lets explore a new solution after swapping some colors
-            print(f'swapping {p[0]} and {p[1]}')
+            # print(f'swapping {p[0]} and {p[1]}')
             new_solution = swapping(new_solution, cs, p)
-        print(f"new solution is feasible: {check_feasibility(edges, new_solution)}")
-        if max(new_solution) < max(solution):
-            solution = new_solution.copy()
-            return solution
-        elif new_solution != solution:
-            pass
+        if check_feasibility(edges, new_solution):
+            if max(new_solution) < max(solution):
+                solution = new_solution.copy()
+                return solution
+            elif new_solution != solution:
+                pass
         else:
             break
 
@@ -124,12 +124,17 @@ def swapping(new_solution, cs, path):
     #swap colors
     destination, origin = path
     chosen_color = new_solution[destination]
-    open_color = min(cs.edges_constraints[destination])
+    removed_color = new_solution[origin]
+    open_color = min([x for x in range(cs.upper_bound) if len(cs.get_single_constraint(destination,x)) == 0])
     new_solution[destination] = open_color
     new_solution[origin] = chosen_color
     #update constraints
-    cs._refresh_constraints(origin,new_solution)
-    cs._refresh_constraints(destination,new_solution)
+    cs._change_constraints(origin,chosen_color, [])
+    cs._change_constraints(origin,removed_color, [], 'remove')
+
+    cs._change_constraints(destination,open_color, [])
+    cs._change_constraints(destination,chosen_color, [], 'remove')
+
     return new_solution
 
 def first_approximation(edges, solution, cs, upper_bound):
@@ -164,13 +169,13 @@ def prune_edges(edges, solution):
 def choose_next_point_order(solution, cs):
     #order by open edges and then number of constraints. #TODO
     list_of_remaining_vertex = [v for v,s in enumerate(solution) if (s is np.nan)]
-    order_list = [(len(cs._get_constraints(v)), v) for v in list_of_remaining_vertex]
+    order_list = [(cs.get_detailed_constraints(v), v) for v in list_of_remaining_vertex]
     order_list.sort(key = lambda x: (x[0]))
 
     return order_list
 
 def color_vertex(vertex, solution, upper_bound, cs, edges):
-    color = min([x for x in range(upper_bound) if x in cs._get_constraints(vertex)])
+    color = min([x for x in range(upper_bound) if len(cs.get_single_constraint(vertex,x)) == 0])
     solution[vertex] = color
     cs._change_constraints(vertex, color, edges)
 
@@ -182,43 +187,59 @@ class constraint_store:
         self.edges = edges
         self.edges_constraints = {}
         self.upper_bound = upper_bound
+        self.num_vertices = num_vertices
         # self.num_open_edges = {}
         for v in range(num_vertices):
-            self.edges_constraints[v] = range(upper_bound)
+            self.edges_constraints[v] = {}
+            for x in range(upper_bound):
+                self.edges_constraints[v][x] = []
         # for e in edges:
         #     for i in e:
         #         self.num_open_edges[i] = self.num_open_edges.get(i,0) + 1
+    def find_open_vertex(self,v):
+        for k in range(self.upper_bound):
+            if len(self.get_single_constraint(v,k)) == 0:
+                return True
+        return False
+
+    def get_single_constraint(self,v,k):
+        return self.edges_constraints[v][k]
 
     def _get_constraints(self, v):
         return self.edges_constraints[v]
 
+    def get_detailed_constraints(self,v):
+        ans = 0
+        for k in range(self.upper_bound):
+            ans += len(self.get_single_constraint(v,k))
+        return ans
+
     # def _get_open_edges(self, v):
     #     return self.num_open_edges[v]
 
-    def _change_single_constraint(self, v, color):
-        self.edges_constraints[v] = [c for c in self.edges_constraints[v] if c != color]
+    def _change_single_constraint(self, v, color, vertex, action = 'add'):
+        if action == 'add':
+            self.edges_constraints[v][color].append(vertex)
+        elif action == 'remove':
+            self.edges_constraints[v][color].remove(vertex)
+        else:
+            raise Exception(f"unknown action {action}")
 
-    def _change_constraints(self, v, color, edges):
-        self._change_single_constraint(v, color)
+    def _change_constraints(self, v, color, edges, action = 'add'):
+        if len(edges) == 0:
+            edges = self.edges
+        self._change_single_constraint(v, color,v,action)
         for (x,y) in edges:
             if v == x:
-                self._change_single_constraint(y, color)
+                self._change_single_constraint(y, color,x,action)
             elif v == y:
-                self._change_single_constraint(x, color)
+                self._change_single_constraint(x, color,y,action)
 
     def _update_upper_bound(self, upper_bound):
+        for k in self.edges_constraints.keys():
+            for i in range(upper_bound, self.upper_bound):
+                del self.edges_constraints[k][i]
         self.upper_bound = upper_bound
-        for k,v in self.edges_constraints.items():
-            self.edges_constraints[k] = [c for c in self.edges_constraints[k] if c < upper_bound - 1]
-
-    def _refresh_constraints(self,v,solution):
-        self.edges_constraints[v] = range(self.upper_bound)
-        self._change_single_constraint(v, solution[v])
-        for x,y in self.edges:
-            if v == x:
-                self._change_single_constraint(x, solution[y])
-            elif v == y:
-                self._change_single_constraint(y, solution[x])
 
 def check_feasibility(edges, solution):
     for (x,y) in edges:
@@ -236,7 +257,7 @@ if __name__ == '__main__':
             input_data = input_data_file.read()
         print(solve_it(input_data))
     elif flag:
-        file_location = './data/gc_250_9'
+        file_location = './data/gc_100_1'
         with open(file_location, 'r') as input_data_file:
             input_data = input_data_file.read()
         print(solve_it(input_data))
