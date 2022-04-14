@@ -38,15 +38,17 @@ def find_minimal_coloring(node_count, edges, solution):
     counter = 0
     #first approximation
     while np.nan in tmp:
-        if counter % 10 == 0:
+        if counter % 100 == 0:
             #prune edges
             new_edges = prune_edges(new_edges, tmp)
             #order remaining open vertexes
             order_list = choose_next_point_order(tmp, cs)
+            print(f'we still have {len(order_list)} points to color')
         #choose a point
         v = order_list.pop(0)
         #color it
-        solution = color_vertex(v, tmp, upper_bound, cs, new_edges)
+        tmp = color_vertex(v, tmp, upper_bound, cs, new_edges)
+        counter += 1
 
     if not np.nan in tmp:
         solution = tmp.copy()
@@ -73,14 +75,11 @@ def replace_color_ordering(solution,upper_bound,edges,cs):
     vertexes_to_consider = [v for (v,s) in enumerate(new_solution) if s == upper_bound -1]
     while len(vertexes_to_consider) > 0:
         explore_que = []
-        open_vertexes = [v for v in range(len(new_solution)) if cs.find_open_vertex(v)]
         #check if there is a theoretical solution. if not break
-        if len(vertexes_to_consider) > len(open_vertexes):
-            return solution
         #first lets find a path
         vertex = vertexes_to_consider.pop()
         print(f'vertex is: {vertex}')
-        path = find_possible_paths(vertex, open_vertexes, edges, new_solution, explore_que, 0, [], 1)
+        path = find_possible_paths(vertex, cs, edges, new_solution, explore_que, 0, 1, [])
         for p in path:
             #now lets explore a new solution after swapping some colors
             print(f'swapping {p[0]} and {p[1]}')
@@ -96,7 +95,10 @@ def replace_color_ordering(solution,upper_bound,edges,cs):
 
     return solution
 
-def find_possible_paths(vertex, open_vertexes, edges, new_solution,explore_que, path_cost = 0, que_so_far = [], level = 1):
+def find_possible_paths(vertex, cs, edges, new_solution, explore_que, path_cost = 0, level = 1, potential_paths = []):
+    if level >= 10:
+        return []
+    open_vertexes =  [v for v in range(len(new_solution)) if cs.find_open_vertex(v)]
     relevant_edges = [(x,y) for x,y in edges if (x==vertex or y==vertex)]
     neighbors = [item for sublist in relevant_edges for item in sublist if item != vertex]
     colors_constraints = {}
@@ -112,23 +114,21 @@ def find_possible_paths(vertex, open_vertexes, edges, new_solution,explore_que, 
         try:
             counter = len(possible_changes[c]) - len(colors_constraints[c])
             if counter >= 0:
-                explore_que.append((level, True, -path_cost, que_so_far + [(s,vertex) for s in possible_changes[c]], [], new_solution[possible_changes[c][0]]))
+                explore_que.append((level, True, -path_cost, potential_paths + [(s,vertex) for s in possible_changes[c]], [], new_solution[possible_changes[c][0]]))
             else:
                 unsolved = [x for x in colors_constraints[c] if x not in possible_changes[c]]
-                explore_que.append((level, False, -(path_cost + len(unsolved)), [(s,vertex) for s in possible_changes[c]] , unsolved, new_solution[possible_changes[c][0]]))
+                explore_que.append((level, False, -(path_cost + len(unsolved) * level), potential_paths + [(s,vertex) for s in possible_changes[c]] , unsolved, new_solution[possible_changes[c][0]]))
         except:
             pass
 
     explore_que.sort(key = lambda x: (x[1],-x[0], x[2], -len(x[3]), -x[5]),reverse=True)
     if len([flag for (_,flag,_,_,_, _) in explore_que if flag]) > 0:
-        potential_paths =  [x for (_,flag,_,x,_, _) in explore_que if flag][0]
-    else:
+        potential_paths =  [x for (_,flag,_,x,_,_) in explore_que if flag][0]
+    elif len(explore_que) > 0:
         level,_,new_cost,swapped, vertexes_to_explore, color = explore_que.pop(0)
-        potential_paths = que_so_far
-        for v in vertexes_to_explore:
-            new_open = [x for x in open_vertexes if not x in colors_constraints[color]]
-            potential_paths += find_possible_paths(v, new_open, edges, new_solution, explore_que, -new_cost, swapped, level+1)
-
+        potential_paths = [find_possible_paths(v, cs, edges, new_solution, explore_que, -new_cost, level+1, swapped) for v in vertexes_to_explore][0]
+    else:
+        potential_paths =[]
     return potential_paths
 
 def swapping(new_solution, cs, path):
@@ -247,7 +247,7 @@ if __name__ == '__main__':
             input_data = input_data_file.read()
         print(solve_it(input_data))
     elif flag:
-        file_location = './data/gc_250_9'
+        file_location = './data/gc_50_3'
         with open(file_location, 'r') as input_data_file:
             input_data = input_data_file.read()
         print(solve_it(input_data))
