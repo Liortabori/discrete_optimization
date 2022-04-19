@@ -23,6 +23,7 @@ def solve_it(input_data):
     solution = range(node_count)
     #go into the calculation
     solution = find_minimal_coloring(node_count,edges, solution)
+    # print(f'feasable == {check_feasibility(edges,solution)}')
 
     # prepare the solution in the specified output format
     output_data = str(max(solution) + 1) + ' ' + str(0) + '\n'
@@ -38,12 +39,12 @@ def find_minimal_coloring(node_count, edges, solution):
     counter = 0
     #first approximation
     while np.nan in tmp:
-        if counter % 100 == 0:
+        if counter % 10 == 0:
             #prune edges
             new_edges = prune_edges(new_edges, tmp)
             #order remaining open vertexes
             order_list = choose_next_point_order(tmp, cs)
-            print(f'we still have {len(order_list)} points to color')
+            # print(f'we still have {len(order_list)} points to color')
         #choose a point
         v = order_list.pop(0)
         #color it
@@ -55,7 +56,6 @@ def find_minimal_coloring(node_count, edges, solution):
         upper_bound = len(set(solution))
         cs._update_upper_bound(upper_bound)
         print(f'upper_bound found is: {upper_bound}')
-        # print(solution)
 
     #outer loop
     while True:
@@ -75,14 +75,14 @@ def replace_color_ordering(solution,upper_bound,edges,cs):
     vertexes_to_consider = [v for (v,s) in enumerate(new_solution) if s == upper_bound -1]
     while len(vertexes_to_consider) > 0:
         explore_que = []
-        #check if there is a theoretical solution. if not break
-        #first lets find a path
+        #first lets find a possible path
         vertex = vertexes_to_consider.pop()
-        print(f'vertex is: {vertex}')
         path = find_possible_paths(vertex, cs, edges, new_solution, explore_que, 0, 1, [])
+        if len(path) == 0:
+            break
         for p in path:
             #now lets explore a new solution after swapping some colors
-            print(f'swapping {p[0]} and {p[1]}')
+            # print(f'swapping {p[0]} and {p[1]}')
             new_solution = swapping(new_solution, cs, p)
         if check_feasibility(edges, new_solution):
             if max(new_solution) < max(solution):
@@ -122,6 +122,7 @@ def find_possible_paths(vertex, cs, edges, new_solution, explore_que, path_cost 
             pass
 
     explore_que.sort(key = lambda x: (x[1],-x[0], x[2], -len(x[3]), -x[5]),reverse=True)
+
     if len([flag for (_,flag,_,_,_, _) in explore_que if flag]) > 0:
         potential_paths =  [x for (_,flag,_,x,_,_) in explore_que if flag][0]
     elif len(explore_que) > 0:
@@ -136,16 +137,18 @@ def swapping(new_solution, cs, path):
     destination, origin = path
     chosen_color = new_solution[destination]
     removed_color = new_solution[origin]
-    open_color = min([x for x in range(cs.upper_bound) if len(cs.get_single_constraint(destination,x)) == 0])
-    new_solution[destination] = open_color
-    new_solution[origin] = chosen_color
-    #update constraints
-    cs._change_constraints(origin,chosen_color, [])
-    cs._change_constraints(origin,removed_color, [], 'remove')
+    try: #TODO- fix this bug instead of going around it
+        open_color = min([x for x in range(cs.upper_bound) if len(cs.get_single_constraint(destination,x)) == 0])
+        new_solution[destination] = open_color
+        new_solution[origin] = chosen_color
+        #update constraints
+        cs._change_constraints(origin,chosen_color, [])
+        cs._change_constraints(origin,removed_color, [], 'remove')
 
-    cs._change_constraints(destination,open_color, [])
-    cs._change_constraints(destination,chosen_color, [], 'remove')
-
+        cs._change_constraints(destination,open_color, [])
+        cs._change_constraints(destination,chosen_color, [], 'remove')
+    except:
+        pass
     return new_solution
 
 def prune_edges(edges, solution):
@@ -247,7 +250,7 @@ if __name__ == '__main__':
             input_data = input_data_file.read()
         print(solve_it(input_data))
     elif flag:
-        file_location = './data/gc_50_3'
+        file_location = './data/gc_500_1'
         with open(file_location, 'r') as input_data_file:
             input_data = input_data_file.read()
         print(solve_it(input_data))
